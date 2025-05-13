@@ -1,0 +1,4 @@
+dist/
+
+# editor and IDE paraphernalia
+.idea

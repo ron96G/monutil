@@ -1,0 +1,26 @@
+name: Test My Action
+on:
+  workflow_dispatch:
+
+jobs:
+  test_local_action:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Fetch depth 0 is important if your action performs git operations
+          # like diff, which your monutil tool does.
+          fetch-depth: 0
+
+      - name: Run my local action
+        id: run_my_action
+        uses: ./
+        with:
+          base-commit: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before }}
+          head-commit: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event_name == 'push' && github.sha }}
+
+      - name: Print changed modules
+        run: |
+          echo "Changed modules output:"
+          echo "${{ steps.run_my_action.outputs.changed-modules }}"

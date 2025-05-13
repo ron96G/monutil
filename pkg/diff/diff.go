@@ -2,6 +2,10 @@ package diff
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -9,38 +13,42 @@ import (
 	"github.com/pkg/errors"
 )
 
-func FindChangedModules(headCommitSha, beforeCommitSha string) ([]string, error) {
-
+func FindChangedModules(beforeCommitSha, headCommitSha string, depth int, filePattern *regexp.Regexp) ([]string, error) {
 	gitRepo, err := git.PlainOpen(".")
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open git repository")
 	}
 
-	// Get the HEAD reference
-	headRef, err := gitRepo.Reference(plumbing.ReferenceName(headCommitSha), true)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get HEAD reference")
-	}
-	// Get the base reference
-	baseRef, err := gitRepo.Reference(plumbing.ReferenceName(beforeCommitSha), true)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get base reference")
+	var baseTree *object.Tree
+	if beforeCommitSha != "" {
+		baseHash := plumbing.NewHash(beforeCommitSha)
+		// Get the commit object for the base reference
+		baseCommit, err := gitRepo.CommitObject(baseHash)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get commit object for base reference")
+		}
+		baseTree, err = baseCommit.Tree()
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get tree object for base commit")
+		}
 	}
 
-	// Get the commit object for the base reference
-	baseCommit, err := gitRepo.CommitObject(baseRef.Hash())
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get commit object for base reference")
+	var headHash plumbing.Hash
+	if headCommitSha != "" {
+		headHash = plumbing.NewHash(headCommitSha)
+	} else {
+		// Get the HEAD reference
+		headRef, err := gitRepo.Reference(plumbing.HEAD, true)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get HEAD reference")
+		}
+		headHash = headRef.Hash()
+		fmt.Fprintf(os.Stderr, "HEAD hash: %s\n", headHash.String())
 	}
-	// Get the commit object for the HEAD reference
-	headCommit, err := gitRepo.CommitObject(headRef.Hash())
+
+	headCommit, err := gitRepo.CommitObject(headHash)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get commit object for HEAD reference")
-	}
-
-	baseTree, err := baseCommit.Tree()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get tree object for base commit")
 	}
 
 	headTree, err := headCommit.Tree()
@@ -53,9 +61,51 @@ func FindChangedModules(headCommitSha, beforeCommitSha string) ([]string, error)
 		return nil, errors.Wrapf(err, "failed to get diff between trees")
 	}
 
+	return GetChangedPaths(changes, depth, filePattern)
+}
+
+func GetChangedPaths(changes object.Changes, maxDepth int, filePattern *regexp.Regexp) ([]string, error) {
+	foundPaths := make(map[string]struct{})
+	changedPaths := []string{}
+
 	for _, change := range changes {
-		fmt.Printf("Change: %s\n", change)
+		action, err := change.Action()
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get action for change")
+		}
+
+		if action.String() == "Delete" {
+			continue
+		}
+
+		path := change.To.Name
+		if !filePattern.MatchString(path) {
+			fmt.Fprintf(os.Stderr, "Skipping %s\n", path)
+			continue
+		}
+
+		// check for maxDepth
+		parts := strings.Split(path, "/")
+		shortenedPath := filepath.Join(parts[:maxDepth]...)
+
+		if _, ok := foundPaths[shortenedPath]; ok {
+			continue
+		}
+		info, err := os.Stat(shortenedPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, errors.Wrapf(err, "failed to stat path %s", shortenedPath)
+		}
+		if !info.IsDir() {
+			continue
+		}
+
+		foundPaths[shortenedPath] = struct{}{}
+		changedPaths = append(changedPaths, shortenedPath)
 	}
 
-	return nil, nil
+	return changedPaths, nil
+
 }

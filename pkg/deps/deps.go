@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/pkg/errors"
 	"golang.org/x/mod/modfile"
 )
 
@@ -74,38 +75,35 @@ func hasDirectDependency(dependentGoModPath string, targetModuleCanonicalPath st
 	return false, nil
 }
 
+type Dependent struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
 // FindDependents recursively finds all modules in the workspace that depend on the initial module.
 // It takes the path to the initial module's directory.
-// It returns a sorted list of simple names of dependent modules, a list of log messages, and an error if a fatal error occurs.
-func FindDependents(initialModuleDir string) ([]string, []string, error) {
-	var logs []string
-
-	// 1. Determine initial module from the provided path
-	initialModuleName := filepath.Base(initialModuleDir)
-
+func FindDependents(initialModuleDir string) ([]Dependent, error) {
 	initialModuleGoModPath := filepath.Join(initialModuleDir, "go.mod")
 	initialModuleCanonicalPath, err := getModuleCanonicalPath(initialModuleGoModPath)
 	if err != nil {
-		// Original code had multiple Fprintf calls for this error. Consolidating.
-		newErr := fmt.Errorf("getting canonical path for initial module '%s' in %s: %w. Ensure it's a Go module root", initialModuleName, initialModuleDir, err)
-		logs = append(logs, newErr.Error())
-		return nil, logs, newErr
+		return nil, errors.Wrap(err, "getting initial module canonical path")
 	}
-	logs = append(logs, fmt.Sprintf("Searching for dependents of module: %s (%s)", initialModuleName, initialModuleCanonicalPath))
 
 	// 2. Determine workspace root (parent of the initial module directory) and find all modules
 	workspaceRoot := filepath.Dir(initialModuleDir)
 
-	allModulesDirToCanonical, canonicalToSimpleName, err := findAllModules(workspaceRoot)
+	allModulesDirToCanonical, _, err := findAllModules(workspaceRoot)
 	if err != nil {
-		newErr := fmt.Errorf("finding all modules in workspace %s: %w", workspaceRoot, err)
-		logs = append(logs, newErr.Error())
-		return nil, logs, newErr
+		return nil, errors.Wrap(err, "finding all modules")
 	}
 	if len(allModulesDirToCanonical) == 0 {
-		newErr := fmt.Errorf("no Go modules found in the workspace root: %s", workspaceRoot)
-		logs = append(logs, newErr.Error())
-		return nil, logs, newErr
+		return nil, fmt.Errorf("no modules found in workspace root %s", workspaceRoot)
+	}
+
+	// Create a reverse map from canonical path to module directory for easy lookup
+	canonicalPathToModuleDir := make(map[string]string)
+	for dir, canon := range allModulesDirToCanonical {
+		canonicalPathToModuleDir[canon] = dir
 	}
 
 	// 3. Dependency Checking
@@ -129,8 +127,7 @@ func FindDependents(initialModuleDir string) ([]string, []string, error) {
 			otherModuleGoModPath := filepath.Join(otherModuleDir, "go.mod")
 			isDependent, err := hasDirectDependency(otherModuleGoModPath, currentModuleToFindDependenciesFor)
 			if err != nil {
-				logs = append(logs, fmt.Sprintf("Warning: error checking if module at %s depends on %s: %v", otherModuleDir, currentModuleToFindDependenciesFor, err))
-				continue // Continue with other modules
+				return nil, fmt.Errorf("checking dependency from %s to %s: %w", otherModuleGoModPath, currentModuleToFindDependenciesFor, err)
 			}
 
 			if isDependent {
@@ -150,20 +147,21 @@ func FindDependents(initialModuleDir string) ([]string, []string, error) {
 		}
 	}
 
-	// 4. Output results preparation
-	var resultNames []string
+	var results []Dependent
 	if len(dependentsFoundCanonicalPaths) > 0 {
 		for depCanonicalPath := range dependentsFoundCanonicalPaths {
-			simpleName, ok := canonicalToSimpleName[depCanonicalPath]
+			moduleDir, ok := canonicalPathToModuleDir[depCanonicalPath]
+
 			if ok {
-				resultNames = append(resultNames, simpleName)
+				results = append(results, Dependent{Name: depCanonicalPath, Path: moduleDir})
 			} else {
-				// This case should ideally not be reached if findAllModules is comprehensive
-				logs = append(logs, fmt.Sprintf("Warning: simple name unknown for canonical path %s", depCanonicalPath))
-				resultNames = append(resultNames, depCanonicalPath+" (simple name unknown)")
+				return nil, fmt.Errorf("could not find module directory for canonical path %s", depCanonicalPath)
 			}
 		}
-		sort.Strings(resultNames)
+		// Sort results by name
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].Name < results[j].Name
+		})
 	}
-	return resultNames, logs, nil
+	return results, nil
 }

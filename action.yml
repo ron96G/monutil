@@ -1,0 +1,97 @@
+name: Go Monorepo Util
+description: "A GitHub Action to find Go modules in a monorepo affected by file changes between two commits. It identifies directly changed modules and their dependents."
+author: "Your Name" # Please update with your name or organization
+inputs:
+  base-commit:
+    description: "Base commit SHA for diff"
+    required: true
+  head-commit:
+    description: "Head commit SHA for diff"
+    required: true
+  depth:
+    description: "Depth for the diff operation used to find changed files."
+    required: false
+    default: "1"
+  output-format:
+    description: "Output format for the list of affected modules (json or text)."
+    required: false
+    default: "json"
+  file-pattern:
+    description: "Regex pattern for files to consider when detecting changes. Changes in matching files trigger module analysis."
+    required: false
+    default: '^.*(\\.go|go\\.mod|go\\.sum)$'
+  verbose:
+    description: "Enable verbose output from the monutil tool."
+    required: false
+    default: "false"
+  debug:
+    description: "Enable debug output from the monutil tool."
+    required: false
+    default: "false"
+  go-version:
+    description: "Version of Go to use for building and running the tool."
+    required: false
+    default: "1.23"
+
+outputs:
+  changed-modules:
+    description: "The output from the monutil command. If format is json, this will be a JSON string of affected modules. If text, it will be multi-line text."
+    value: ${{ steps.run-monutil.outputs.raw_output }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Fetch all history for git diff to work correctly
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - name: Build monutil
+      shell: bash
+      run: |
+        echo "Building monutil tool from ./cmd/monutil.go..."
+        go build -v -o monutil ./cmd/monutil.go
+        echo "monutil built successfully."
+
+    - name: Run monutil
+      id: run-monutil
+      shell: bash
+      env:
+        INPUT_BASE_COMMIT: ${{ inputs.base-commit }}
+        INPUT_HEAD_COMMIT: ${{ inputs.head-commit }}
+        INPUT_DEPTH: ${{ inputs.depth }}
+        INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
+        INPUT_FILE_PATTERN: ${{ inputs.file-pattern }}
+        INPUT_VERBOSE: ${{ inputs.verbose }}
+        INPUT_DEBUG: ${{ inputs.debug }}
+      run: |
+        COMMAND_ARGS=()
+
+        # base-commit and head-commit are required by the action, so they will always be set.
+        COMMAND_ARGS+=("-base" "$INPUT_BASE_COMMIT")
+        COMMAND_ARGS+=("-head" "$INPUT_HEAD_COMMIT")
+
+        # Add other flags if their corresponding inputs are provided (or have defaults)
+        if [[ -n "$INPUT_DEPTH" ]]; then COMMAND_ARGS+=("-depth" "$INPUT_DEPTH"); fi
+        if [[ -n "$INPUT_OUTPUT_FORMAT" ]]; then COMMAND_ARGS+=("-format" "$INPUT_OUTPUT_FORMAT"); fi
+        if [[ -n "$INPUT_FILE_PATTERN" ]]; then COMMAND_ARGS+=("-pattern" "$INPUT_FILE_PATTERN"); fi
+
+        # Boolean flags: only add if 'true'
+        if [[ "$INPUT_VERBOSE" == "true" ]]; then COMMAND_ARGS+=("-verbose"); fi
+        if [[ "$INPUT_DEBUG" == "true" ]]; then COMMAND_ARGS+=("-debug"); fi
+
+        echo "Executing: ./monutil ${COMMAND_ARGS[@]}"
+        OUTPUT_CONTENT=$(./monutil "${COMMAND_ARGS[@]}")
+
+        echo "Output from monutil:"
+        echo "${OUTPUT_CONTENT}" # Log the raw output for easier debugging in action logs
+
+        # Set the multiline output for the action using heredoc
+        echo "raw_output<<EOF" >> $GITHUB_OUTPUT
+        echo "${OUTPUT_CONTENT}" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
