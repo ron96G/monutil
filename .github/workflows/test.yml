@@ -1,6 +1,6 @@
 name: Test My Action
 on:
-  workflow_dispatch:
+  push:
 
 jobs:
   test_local_action:
