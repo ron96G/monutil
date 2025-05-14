@@ -158,7 +158,8 @@ runs:
 
         # Verify checksum
         echo "Verifying checksum for ${ASSET_FILENAME}..."
-        EXPECTED_CHECKSUM=$(grep "${ASSET_FILENAME}" "${CHECKSUMS_FILENAME}" | awk '{print $1}')
+        # Use awk to find the line where the second field is an exact match for ASSET_FILENAME
+        EXPECTED_CHECKSUM=$(awk -v asset_file="${ASSET_FILENAME}" '$2 == asset_file {print $1}' "${CHECKSUMS_FILENAME}")
 
         if [[ -z "${EXPECTED_CHECKSUM}" ]]; then
           echo "Error: Could not find checksum for ${ASSET_FILENAME} in ${CHECKSUMS_FILENAME}."
