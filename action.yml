@@ -28,10 +28,10 @@ inputs:
     description: "Enable debug output from the monutil tool."
     required: false
     default: "false"
-  go-version:
-    description: "Version of Go to use for building and running the tool."
+  version:
+    description: "The version (tag) of monutil to download (e.g., v1.0.0). Defaults to 'latest'."
     required: false
-    default: "1.23"
+    default: "latest"
 
 outputs:
   changed-modules:
@@ -46,17 +46,163 @@ runs:
       with:
         fetch-depth: 0 # Fetch all history for git diff to work correctly
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ inputs.go-version }}
-
-    - name: Build monutil
+    - name: Download and Setup monutil
       shell: bash
       run: |
-        echo "Building monutil tool from ./cmd/monutil.go..."
-        go build -v -o monutil ./cmd/monutil.go
-        echo "monutil built successfully."
+        set -e # Exit immediately if a command exits with a non-zero status.
+
+        PROJECT_NAME="monutil" # Used for constructing asset and checksum filenames
+        REPO_NAME="ron96g/${PROJECT_NAME}" # GitHub repository name
+        OS_NAME_PART=""
+        ARCH_NAME_PART=""
+        ASSET_EXT="tar.gz" # As per .goreleaser.yaml for Linux
+        INPUT_VERSION="${{ inputs.version }}" # Get the version input
+
+        echo "Runner OS: ${{ runner.os }}, Runner Arch: ${{ runner.arch }}"
+        echo "Requested monutil version: ${INPUT_VERSION}"
+
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          OS_NAME_PART="Linux" # Corresponds to 'title .Os' in goreleaser for 'linux'
+        else
+          echo "Error: Unsupported OS \'${{ runner.os }}\'. This action currently only supports Linux."
+          exit 1
+        fi
+
+        if [[ "${{ runner.arch }}" == "X64" ]]; then
+          ARCH_NAME_PART="x86_64" # Corresponds to 'amd64' in goreleaser name_template
+        elif [[ "${{ runner.arch }}" == "ARM64" ]]; then
+          ARCH_NAME_PART="arm64"  # Corresponds to 'arm64' in goreleaser name_template
+        else
+          echo "Error: Unsupported architecture \'${{ runner.arch }}\' for OS \'${{ runner.os }}\'."
+          echo "This action currently supports Linux/X64 (amd64) and Linux/ARM64 (arm64) based on .goreleaser.yaml."
+          exit 1
+        fi
+
+        ASSET_FILENAME="${PROJECT_NAME}_${OS_NAME_PART}_${ARCH_NAME_PART}.${ASSET_EXT}"
+
+        # Determine the release tag to use
+        TAG_NAME=""
+        if [[ "${INPUT_VERSION}" == "latest" || -z "${INPUT_VERSION}" ]]; then
+          echo "Fetching latest release information..."
+          LATEST_RELEASE_INFO_URL="https://api.github.com/repos/${REPO_NAME}/releases/latest"
+          LATEST_RELEASE_JSON_FILE=$(mktemp)
+          # Add -L to follow redirects for curl
+          curl -sSL -H "Accept: application/vnd.github.v3+json" -o "${LATEST_RELEASE_JSON_FILE}" "${LATEST_RELEASE_INFO_URL}"
+
+          if [[ $? -ne 0 || ! -s "${LATEST_RELEASE_JSON_FILE}" ]]; then
+            echo "Error: Failed to download latest release information from ${LATEST_RELEASE_INFO_URL}."
+            cat "${LATEST_RELEASE_JSON_FILE}" # Print output for debugging
+            rm -f "${LATEST_RELEASE_JSON_FILE}"
+            exit 1
+          fi
+
+          TAG_NAME=$(jq -r .tag_name "${LATEST_RELEASE_JSON_FILE}")
+          rm -f "${LATEST_RELEASE_JSON_FILE}" # Clean up temp file
+
+          if [[ -z "$TAG_NAME" || "$TAG_NAME" == "null" ]]; then
+            echo "Error: Could not extract tag_name from latest release information."
+            # Optionally print the JSON content if jq fails to parse for debugging
+            # cat "${LATEST_RELEASE_JSON_FILE}" # This was already removed, so cannot cat
+            exit 1
+          fi
+          echo "Latest release tag determined as: ${TAG_NAME}"
+        else
+          TAG_NAME="${INPUT_VERSION}"
+          # Validate that the specified tag exists by trying to fetch its release info
+          echo "Verifying specified release tag: ${TAG_NAME}..."
+          SPECIFIC_RELEASE_INFO_URL="https://api.github.com/repos/${REPO_NAME}/releases/tags/${TAG_NAME}"
+          SPECIFIC_RELEASE_JSON_FILE=$(mktemp)
+          # Add -L to follow redirects for curl
+          HTTP_STATUS_CODE=$(curl -sSL -w "%{http_code}" -H "Accept: application/vnd.github.v3+json" -o "${SPECIFIC_RELEASE_JSON_FILE}" "${SPECIFIC_RELEASE_INFO_URL}")
+
+          if [[ "${HTTP_STATUS_CODE}" -ne 200 || ! -s "${SPECIFIC_RELEASE_JSON_FILE}" ]]; then
+            echo "Error: Failed to verify specified release tag '${TAG_NAME}'. HTTP Status: ${HTTP_STATUS_CODE}"
+            echo "URL: ${SPECIFIC_RELEASE_INFO_URL}"
+            cat "${SPECIFIC_RELEASE_JSON_FILE}" # Print output for debugging
+            rm -f "${SPECIFIC_RELEASE_JSON_FILE}"
+            exit 1
+          fi
+          # We don't need to parse the tag name from here, just confirm it exists
+          rm -f "${SPECIFIC_RELEASE_JSON_FILE}"
+          echo "Specified release tag ${TAG_NAME} verified."
+        fi
+
+        VERSION=$(echo "${TAG_NAME}" | sed 's/^v//') # Example: v1.0.0 -> 1.0.0
+        echo "Derived version for asset naming: ${VERSION}"
+
+        CHECKSUMS_FILENAME="${PROJECT_NAME}_${VERSION}_checksums.txt"
+        RELEASE_DOWNLOAD_BASE_URL="https://github.com/${REPO_NAME}/releases/download/${TAG_NAME}"
+
+        ASSET_DOWNLOAD_URL="${RELEASE_DOWNLOAD_BASE_URL}/${ASSET_FILENAME}"
+        CHECKSUMS_DOWNLOAD_URL="${RELEASE_DOWNLOAD_BASE_URL}/${CHECKSUMS_FILENAME}"
+
+        # Download asset
+        echo "Attempting to download \'${ASSET_FILENAME}\' from ${ASSET_DOWNLOAD_URL}"
+        curl -sSL -o "${ASSET_FILENAME}" "${ASSET_DOWNLOAD_URL}"
+        if [[ $? -ne 0 || ! -s "${ASSET_FILENAME}" ]]; then
+          echo "Error: Failed to download or downloaded an empty file: ${ASSET_FILENAME} from ${ASSET_DOWNLOAD_URL}"
+          echo "Please ensure a release exists at ${RELEASE_DOWNLOAD_BASE_URL} and contains the asset ${ASSET_FILENAME}"
+          exit 1
+        fi
+        echo "Successfully downloaded ${ASSET_FILENAME}."
+
+        # Download checksums file
+        echo "Attempting to download checksums file \'${CHECKSUMS_FILENAME}\' from ${CHECKSUMS_DOWNLOAD_URL}"
+        curl -sSL -o "${CHECKSUMS_FILENAME}" "${CHECKSUMS_DOWNLOAD_URL}"
+        if [[ $? -ne 0 || ! -s "${CHECKSUMS_FILENAME}" ]]; then
+          echo "Error: Failed to download or downloaded an empty checksums file: ${CHECKSUMS_FILENAME} from ${CHECKSUMS_DOWNLOAD_URL}"
+          echo "Please ensure a release exists at ${RELEASE_DOWNLOAD_BASE_URL} and contains the asset ${CHECKSUMS_FILENAME}"
+          exit 1
+        fi
+        echo "Successfully downloaded ${CHECKSUMS_FILENAME}."
+
+        # Verify checksum
+        echo "Verifying checksum for ${ASSET_FILENAME}..."
+        EXPECTED_CHECKSUM=$(grep "${ASSET_FILENAME}" "${CHECKSUMS_FILENAME}" | awk '{print $1}')
+
+        if [[ -z "${EXPECTED_CHECKSUM}" ]]; then
+          echo "Error: Could not find checksum for ${ASSET_FILENAME} in ${CHECKSUMS_FILENAME}."
+          echo "Contents of ${CHECKSUMS_FILENAME}:"
+          cat "${CHECKSUMS_FILENAME}"
+          exit 1
+        fi
+        echo "Expected SHA256: ${EXPECTED_CHECKSUM}"
+
+        CALCULATED_CHECKSUM=$(sha256sum "${ASSET_FILENAME}" | awk '{print $1}')
+        echo "Calculated SHA256: ${CALCULATED_CHECKSUM}"
+
+        if [[ "${CALCULATED_CHECKSUM}" == "${EXPECTED_CHECKSUM}" ]]; then
+          echo "Checksum verification successful for ${ASSET_FILENAME}."
+        else
+          echo "Error: Checksum mismatch for ${ASSET_FILENAME}."
+          echo "Expected: ${EXPECTED_CHECKSUM}"
+          echo "Calculated: ${CALCULATED_CHECKSUM}"
+          exit 1
+        fi
+
+        echo "Successfully downloaded and verified ${ASSET_FILENAME}. Extracting \'monutil\'..."
+        # The binary name inside the archive is 'monutil' (from .goreleaser.yaml: builds[0].binary)
+        # Extract 'monutil' directly to the current directory.
+        tar -xzf "${ASSET_FILENAME}" "monutil"
+
+        if [[ $? -ne 0 || ! -f "./monutil" ]]; then
+            echo "Error: Failed to extract \'monutil\' from ${ASSET_FILENAME}."
+            echo "Listing archive contents (if extraction failed):"
+            tar -tzf "${ASSET_FILENAME}" || echo "Could not list archive contents."
+            echo "Current directory listing:"
+            ls -la .
+            exit 1
+        fi
+
+        chmod +x ./monutil
+        echo "\'monutil\' downloaded from release, made executable, and is now at ./monutil"
+
+        # Optional: Verify the tool by checking its presence and executability
+        if [[ ! -x "./monutil" ]]; then
+            echo "Error: ./monutil is not executable or not found after setup."
+            exit 1
+        fi
+        echo "\'monutil\' is ready to be used."
 
     - name: Run monutil
       id: run-monutil
