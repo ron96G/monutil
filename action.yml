@@ -19,7 +19,7 @@ inputs:
   file-pattern:
     description: "Regex pattern for files to consider when detecting changes. Changes in matching files trigger module analysis."
     required: false
-    default: '^.*(\\.go|go\\.mod|go\\.sum)$'
+    default: '^.*(\.go|go\.mod|go\.sum)$'
   verbose:
     description: "Enable verbose output from the monutil tool."
     required: false

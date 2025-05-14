@@ -11,13 +11,15 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
+var gomod = "go.mod"
+
 // getModuleCanonicalPath reads a go.mod file and returns the module's canonical path.
 func getModuleCanonicalPath(goModPath string) (string, error) {
 	content, err := os.ReadFile(goModPath)
 	if err != nil {
 		return "", fmt.Errorf("opening %s: %w", goModPath, err)
 	}
-	modFile, err := modfile.Parse("go.mod", content, nil)
+	modFile, err := modfile.Parse(gomod, content, nil)
 	if err != nil {
 		return "", fmt.Errorf("parsing %s: %w", goModPath, err)
 	}
@@ -41,7 +43,7 @@ func findAllModules(workspaceRoot string) (map[string]string, map[string]string,
 			continue
 		}
 		moduleDirPath := filepath.Join(workspaceRoot, entry.Name())
-		goModPath := filepath.Join(moduleDirPath, "go.mod")
+		goModPath := filepath.Join(moduleDirPath, gomod)
 
 		if stat, err := os.Stat(goModPath); err == nil && !stat.IsDir() { // Corrected syntax error here
 			canonicalPath, err := getModuleCanonicalPath(goModPath)
@@ -63,7 +65,7 @@ func hasDirectDependency(dependentGoModPath string, targetModuleCanonicalPath st
 	if err != nil {
 		return false, fmt.Errorf("opening %s: %w", dependentGoModPath, err)
 	}
-	modFile, err := modfile.Parse("go.mod", content, nil)
+	modFile, err := modfile.Parse(gomod, content, nil)
 	if err != nil {
 		return false, fmt.Errorf("parsing %s: %w", dependentGoModPath, err)
 	}
@@ -83,7 +85,7 @@ type Dependent struct {
 // FindDependents recursively finds all modules in the workspace that depend on the initial module.
 // It takes the path to the initial module's directory.
 func FindDependents(initialModuleDir string) ([]Dependent, error) {
-	initialModuleGoModPath := filepath.Join(initialModuleDir, "go.mod")
+	initialModuleGoModPath := filepath.Join(initialModuleDir, gomod)
 	initialModuleCanonicalPath, err := getModuleCanonicalPath(initialModuleGoModPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting initial module canonical path")
@@ -124,7 +126,7 @@ func FindDependents(initialModuleDir string) ([]Dependent, error) {
 			}
 
 			// Check if this 'otherModule' depends on 'currentModuleToFindDependenciesFor'
-			otherModuleGoModPath := filepath.Join(otherModuleDir, "go.mod")
+			otherModuleGoModPath := filepath.Join(otherModuleDir, gomod)
 			isDependent, err := hasDirectDependency(otherModuleGoModPath, currentModuleToFindDependenciesFor)
 			if err != nil {
 				return nil, fmt.Errorf("checking dependency from %s to %s: %w", otherModuleGoModPath, currentModuleToFindDependenciesFor, err)
