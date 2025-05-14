@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/ron96G/monutil/compare/v1.1.0...v1.1.1) (2025-05-14)
+
+
+### Bug Fixes
+
+* **action:** correct checksum ([c9f0ed9](https://github.com/ron96G/monutil/commit/c9f0ed94f2e5e226830bb861db243bb4814cf493))
+
 # [1.1.0](https://github.com/ron96G/monutil/compare/v1.0.0...v1.1.0) (2025-05-14)
 
 
