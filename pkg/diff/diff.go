@@ -13,14 +13,19 @@ import (
 	"github.com/pkg/errors"
 )
 
-func FindChangedModules(beforeCommitSha, headCommitSha string, depth int, filePattern *regexp.Regexp) ([]string, error) {
+// If the commit SHA is all zeros, it means the first commit in the repo.
+// This is a special case that we need to handle when checking for changes.
+// In this case, we treat all files as changed, since there is no base to diff against.
+const firstCommitSha = "0000000000000000000000000000000000000000"
+
+func FindChangedPaths(beforeCommitSha, headCommitSha string, depth int, filePattern *regexp.Regexp) ([]string, error) {
 	gitRepo, err := git.PlainOpen(".")
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open git repository")
 	}
 
 	var baseTree *object.Tree
-	if beforeCommitSha != "" {
+	if beforeCommitSha != "" && !strings.HasPrefix(beforeCommitSha, firstCommitSha) {
 		baseHash := plumbing.NewHash(beforeCommitSha)
 		// Get the commit object for the base reference
 		baseCommit, err := gitRepo.CommitObject(baseHash)
@@ -86,24 +91,26 @@ func GetChangedPaths(changes object.Changes, maxDepth int, filePattern *regexp.R
 
 		// check for maxDepth
 		parts := strings.Split(path, "/")
-		shortenedPath := filepath.Join(parts[:maxDepth]...)
+		if len(parts) > maxDepth {
+			path = filepath.Join(parts[:maxDepth]...)
+		}
 
-		if _, ok := foundPaths[shortenedPath]; ok {
+		if _, ok := foundPaths[path]; ok {
 			continue
 		}
-		info, err := os.Stat(shortenedPath)
+		info, err := os.Stat(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, errors.Wrapf(err, "failed to stat path %s", shortenedPath)
+			return nil, errors.Wrapf(err, "failed to stat path %s", path)
 		}
 		if !info.IsDir() {
 			continue
 		}
 
-		foundPaths[shortenedPath] = struct{}{}
-		changedPaths = append(changedPaths, shortenedPath)
+		foundPaths[path] = struct{}{}
+		changedPaths = append(changedPaths, path)
 	}
 
 	return changedPaths, nil

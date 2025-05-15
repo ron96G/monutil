@@ -16,7 +16,6 @@ import (
 var (
 	baseCommitSha string
 	headCommitSha string
-	targetModule  string
 	depth         int
 	format        string
 	filePattern   string
@@ -26,7 +25,6 @@ var (
 )
 
 func init() {
-	flag.StringVar(&targetModule, "module", ".", "Target module to check dependencies for")
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output")
 	flag.BoolVar(&debug, "debug", false, "Enable debug output")
 	flag.StringVar(&baseCommitSha, "base", "", "Base commit SHA for diff")
@@ -56,7 +54,7 @@ type FoundModule struct {
 	Path string `json:"path"`
 }
 
-func ForEachChangedModule(changedDirs []string) ([]FoundModule, error) {
+func ForEachChangedPath(changedDirs []string) ([]FoundModule, error) {
 	allRelevantModules := make([]FoundModule, 0)
 
 	for _, dir := range changedDirs {
@@ -94,12 +92,20 @@ func ForEachChangedModule(changedDirs []string) ([]FoundModule, error) {
 func main() {
 	flag.Parse()
 
-	changes, err := diff.FindChangedModules(baseCommitSha, headCommitSha, depth, regexp.MustCompile(filePattern))
+	changes, err := diff.FindChangedPaths(baseCommitSha, headCommitSha, depth, regexp.MustCompile(filePattern))
 	if err != nil {
 		panic(err)
 	}
+	fmt.Fprintf(os.Stderr, "Found %d changed paths\n", len(changes))
 
-	allRelevantModules, err := ForEachChangedModule(changes)
+	if ok, _ := isModule("."); ok {
+		fmt.Fprintf(os.Stderr, "CWD itself is a module\n")
+		if len(changes) > 0 {
+			changes = append(changes, ".")
+		}
+	}
+
+	allRelevantModules, err := ForEachChangedPath(changes)
 	if err != nil {
 		panic(err)
 	}
