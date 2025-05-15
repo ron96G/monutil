@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/ron96G/monutil/compare/v1.2.0...v1.3.0) (2025-05-15)
+
+
+### Features
+
+* added support for first-commit-sha ([824ed67](https://github.com/ron96G/monutil/commit/824ed673a8e3bda017b30ff2c54ddbf6f9dd7792))
+
 # [1.2.0](https://github.com/ron96G/monutil/compare/v1.1.2...v1.2.0) (2025-05-15)
 
 
