@@ -32,6 +32,10 @@ inputs:
     description: "The version (tag) of monutil to download (e.g., v1.0.0). Defaults to 'latest'."
     required: false
     default: "latest"
+  path-only:
+    description: "Output only the paths of the affected modules."
+    required: false
+    default: "true"
 
 outputs:
   changed-modules:
@@ -216,6 +220,7 @@ runs:
         INPUT_FILE_PATTERN: ${{ inputs.file-pattern }}
         INPUT_VERBOSE: ${{ inputs.verbose }}
         INPUT_DEBUG: ${{ inputs.debug }}
+        INPUT_PATH_ONLY: ${{ inputs.path-only }}
       run: |
         COMMAND_ARGS=()
 
@@ -231,6 +236,7 @@ runs:
         # Boolean flags: only add if 'true'
         if [[ "$INPUT_VERBOSE" == "true" ]]; then COMMAND_ARGS+=("-verbose"); fi
         if [[ "$INPUT_DEBUG" == "true" ]]; then COMMAND_ARGS+=("-debug"); fi
+        if [[ "$INPUT_PATH_ONLY" == "true" ]]; then COMMAND_ARGS+=("--path-only"); fi
 
         echo "Executing: ./monutil ${COMMAND_ARGS[@]}"
         OUTPUT_CONTENT=$(./monutil "${COMMAND_ARGS[@]}")

@@ -20,6 +20,7 @@ var (
 	depth         int
 	format        string
 	filePattern   string
+	pathOnly      bool
 	verbose       bool
 	debug         bool
 )
@@ -33,6 +34,7 @@ func init() {
 	flag.IntVar(&depth, "depth", 1, "Depth for diff")
 	flag.StringVar(&format, "format", "json", "Output format (json or text)")
 	flag.StringVar(&filePattern, "pattern", `^.*(\.go|go\.mod|go\.sum)$`, "File pattern to match")
+	flag.BoolVar(&pathOnly, "path-only", false, "Only output the path of the modules")
 }
 
 func isModule(dir string) (bool, error) {
@@ -63,7 +65,7 @@ func ForEachChangedModule(changedDirs []string) ([]FoundModule, error) {
 			return allRelevantModules, err
 		}
 		if isMod {
-			dependents, err := deps.FindDependents(dir)
+			dependents, err := deps.FindDependents(dir, true)
 			if err != nil {
 				return allRelevantModules, err
 			}
@@ -75,7 +77,7 @@ func ForEachChangedModule(changedDirs []string) ([]FoundModule, error) {
 			}
 			for _, dependent := range dependents {
 				if slices.ContainsFunc(allRelevantModules, func(m FoundModule) bool {
-					return m.Name == dependent.Name
+					return m.Path == dependent.Path
 				}) {
 					continue
 				}
@@ -103,6 +105,18 @@ func main() {
 	}
 
 	if format == "json" {
+		if pathOnly {
+			allPaths := make([]string, len(allRelevantModules))
+			for i := range allRelevantModules {
+				allPaths[i] = allRelevantModules[i].Path
+			}
+			b, err := json.Marshal(allPaths)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Println(string(b))
+			return
+		}
 		b, err := json.Marshal(allRelevantModules)
 		if err != nil {
 			panic(err)

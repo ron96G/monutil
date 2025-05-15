@@ -83,8 +83,8 @@ type Dependent struct {
 }
 
 // FindDependents recursively finds all modules in the workspace that depend on the initial module.
-// It takes the path to the initial module's directory.
-func FindDependents(initialModuleDir string) ([]Dependent, error) {
+// It takes the path to the initial module's directory and a boolean to indicate if the initial module itself should be included.
+func FindDependents(initialModuleDir string, addSelf bool) ([]Dependent, error) {
 	initialModuleGoModPath := filepath.Join(initialModuleDir, gomod)
 	initialModuleCanonicalPath, err := getModuleCanonicalPath(initialModuleGoModPath)
 	if err != nil {
@@ -150,6 +150,10 @@ func FindDependents(initialModuleDir string) ([]Dependent, error) {
 	}
 
 	var results []Dependent
+	if addSelf {
+		results = append(results, Dependent{Name: initialModuleCanonicalPath, Path: initialModuleDir})
+	}
+
 	if len(dependentsFoundCanonicalPaths) > 0 {
 		for depCanonicalPath := range dependentsFoundCanonicalPaths {
 			moduleDir, ok := canonicalPathToModuleDir[depCanonicalPath]
