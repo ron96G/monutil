@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/ron96G/monutil/compare/v1.1.2...v1.2.0) (2025-05-15)
+
+
+### Features
+
+* added new input-param path-only; add add-self option for find-dependents ([4bb12b4](https://github.com/ron96G/monutil/commit/4bb12b4e7b869048ee1b2361e45188a345445ca6))
+
 ## [1.1.2](https://github.com/ron96G/monutil/compare/v1.1.1...v1.1.2) (2025-05-14)
 
 
